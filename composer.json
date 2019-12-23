@@ -1,0 +1,13 @@
+{
+    "name": "rain-life/monitor-signal",
+    "description": "一个监听信号量的包",
+    "authors": [
+        {
+            "name": "Rain-Life",
+            "email": "1843704293@qq.com"
+        }
+    ],
+    "require": {
+        "php": ">=7.1.0"
+    }
+}

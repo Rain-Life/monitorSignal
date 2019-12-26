@@ -1,53 +1,77 @@
 <?php
 
-namespace monitorSignal;
+namespace MonitorSignal;
+
+use GuzzleHttp\RequestOptions;
+use GuzzleHttp\Client;
 
 class MonitorSignal
 {
-    public $monitorSignal = -1;//记录监听到的信号
-    public $signals = [SIGHUP, SIGINT, SIGQUIT, SIGILL, SIGTRAP, SIGABRT, SIGEMT, SIGFPE,
-        SIGKILL, SIGBUS, SIGSEGV, SIGSYS, SIGPIPE, SIGALRM, SIGTERM, SIGURG, SIGSTOP, SIGTSTP,
-        SIGCONT, SIGCHLD, SIGTTIN, SIGTTOU, SIGIO, SIGXCPU, SIGXFSZ, SIGVTALRM, SIGPROF, SIGWINCH,
-        SIGINFO, SIGUSR1, SIGUSR2
-    ];//常用信号，可以通过kill -l命令查看
+    const TOKEN = '';//在企业微信群中创建机器人，会生成一个token
+    const URL = '';//填写自己的接收报警的地址即可
+    protected $monitorSignal = [];//记录所有监听到的信号
+    protected $signals = [SIGHUP, SIGINT, SIGQUIT, SIGILL, SIGTRAP, SIGABRT, SIGFPE,
+        SIGBUS, SIGSEGV, SIGSYS, SIGPIPE, SIGALRM, SIGTERM, SIGURG, SIGTSTP,
+        SIGCONT, SIGCHLD, SIGTTIN, SIGTTOU, SIGIO, SIGXCPU, SIGXFSZ, SIGVTALRM, SIGPROF, SIGWINCH, SIGUSR1, SIGUSR2
+    ];//其中6和19这两个信号不能被安装信号处理器
 
-    //通过别名来调用监听信号的类型
-    public function monitor(string $abstract)
+    public function __construct()
     {
         pcntl_async_signals(true);//开启异步监听
-        switch ($abstract) {
-            case 'quit':
-                return $this->monitorQuitSignal();//监听退出的信号
-            case 'any':
-                return $this->monitorAny();//监听所有类型的信号
-            default :
-                return 'unknow';
+        $this->monitorAny();
+    }
+
+    public function monitor(array $signals) : array
+    {
+        $intersect = array_intersect($this->monitorSignal, $signals);
+        foreach ($intersect as $k=>$v) {
+            unset($this->monitorSignal[$k]);
         }
+
+        return $intersect;
     }
 
-    //获取当前监听到的信号
-    public function getSignal()
+    public function quit()
     {
-        return $this->monitorSignal;
-    }
+        $quitSignalArr = array_intersect($this->monitorSignal, [SIGQUIT, SIGTERM]);
+        if (!empty($quitSignalArr)) {
+            //从信号数组中将接收到的信号删掉
+            foreach ($quitSignalArr as $k=>$v) {
+                unset($this->monitorSignal[$k]);
+            }
 
-    //回调
-    public function callBackFunc($signal)
-    {
-        $this->monitorSignal = $signal;
-        if (in_array($signal, [SIGQUIT, SIGTERM])) {
             $this->killSignal();
         }
     }
 
-    //这是一种场景，当一个进程收到SIGQUIT、SIGTERM信号时，让进程睡眠20s。
-    //比如当要终止一个容器运行的时候，Docker会首先向容器发送一个信号，然后等待一段超时时间(默认10s)后，再发送SIGKILL信号来终止容器
-    //因此为了避免数据丢失，当收到SIGQUIT、SIGTERM信号时，让进程睡眠，不再执行
-    private function killSignal()
+    public function getSignal() : array
     {
+        return $this->monitorSignal;
+    }
+
+    public function callBackFunc(int $signal)
+    {
+        if(!in_array($signal, $this->monitorSignal)) {
+            $this->monitorSignal[] = $signal;
+        }
+
+    }
+
+    public function killSignal()
+    {
+        $time = 0;
+        $totalTime = 0;
         while (true) {
-            if (in_array($this->getSignal(), [SIGQUIT, SIGTERM])) {
-                sleep(20);
+            sleep(5);
+            $totalTime+=5;
+            $content = "<font color='warning'>守护进程报警</font>" . "\n";
+            $content .= "项目：<font color='warning'>".$_SERVER['APP_NAME']."</font>" .  "\n";
+            $content .= "脚本：<font color='warning'>".$_SERVER['argv'][1]."</font>" . "\n";
+            $content .= '守护进程'.getmypid().'收到退出(SIGQUIT、SIGTERM)信号，已经过了'.$totalTime.'，还未接收到SIGKILL信号';
+            $this->sendMessage($content, self::TOKEN);
+            $time++;
+            if ($time >= config('signal.sleepTimes')) {
+                break;
             }
         }
     }
@@ -58,16 +82,19 @@ class MonitorSignal
         foreach ($this->signals as $signal) {
             pcntl_signal($signal, array($this, 'callBackFunc'));
         }
-        return $this;
     }
 
-    //监听【关闭进程的信号】
-    public function monitorQuitSignal()
-    {
-        //安装信号处理器
-        pcntl_signal(SIGQUIT, array($this, 'callBackFunc'));
-        pcntl_signal(SIGTERM, array($this, 'callBackFunc'));
+    //发送DingDing消息
+    public function sendMessage($content, $token='') {
+        $client = new Client();
+        $options[RequestOptions::JSON] = [
+            "msgtype" => "markdown",
+            "markdown" => [
+                'content' =>$content
+            ]
+        ];
+        $uri = self::URL.$token;
 
-        return $this;
+        $client->request('POST', $uri, $options);
     }
 }

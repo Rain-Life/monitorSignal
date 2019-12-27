@@ -70,7 +70,7 @@ class MonitorSignal
             $content .= '守护进程'.getmypid().'收到退出(SIGQUIT、SIGTERM)信号，已经过了'.$totalTime.'，还未接收到SIGKILL信号';
             $this->sendMessage($content, self::TOKEN);
             $time++;
-            if ($time >= config('signal.sleepTimes')) {
+            if ($time >= 2) {//这个可以自行配置
                 break;
             }
         }
